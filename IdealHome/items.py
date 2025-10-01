@@ -9,4 +9,8 @@ import scrapy
 class IdealhomeItem(scrapy.Item):
     # define the fields for your item here like:
     # name = scrapy.Field()
+    create_at = scrapy.Field()
+    apartment_name = scrapy.Field()
+    floor = scrapy.Field()
+    url = scrapy.Field()
     pass

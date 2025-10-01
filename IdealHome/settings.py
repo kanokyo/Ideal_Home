@@ -62,9 +62,9 @@ DEFAULT_REQUEST_HEADERS = {
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
+# ITEM_PIPELINES = {
 #    "IdealHome.pipelines.IdealhomePipeline": 300,
-#}
+# }
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -81,35 +81,31 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
 
 # Enable and configure HTTP caching (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-HTTPCACHE_ENABLED = True
-HTTPCACHE_EXPIRATION_SECS = 0
-HTTPCACHE_DIR = "httpcache"
-HTTPCACHE_IGNORE_HTTP_CODES = []
-HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
+# HTTPCACHE_ENABLED = True
+# HTTPCACHE_EXPIRATION_SECS = 0
+# HTTPCACHE_DIR = "httpcache"
+# HTTPCACHE_IGNORE_HTTP_CODES = []
+# HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
 # Set settings whose default value is deprecated to a future-proof value
 FEED_EXPORT_ENCODING = "utf-8-sig"
 
 FEED_FORMAT='csv'
 FEED_EXPORT_FIELDS=[
-    "",
-    "",
-    ""
+    "create_at",
+    "apartment_name",
+    "floor",
+    "url",
 ]
-
-# Playwright ダウンローダーミドルウェアを有効にする
-DOWNLOADER_MIDDLEWARES = {
-    'scrapy_playwright.middleware.ScrapyPlaywrightDownloadHandler': 543,
-}
 
 # HTTP と HTTPS のダウンロードハンドラーを指定する
 DOWNLOAD_HANDLERS = {
-    'http': 'scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler',
-    'https': 'scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler',
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
 
 # Playwright 設定を有効にする
-TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
 # Playwright 設定（オプション）
 PLAYWRIGHT_BROWSER_TYPE = 'chromium'
