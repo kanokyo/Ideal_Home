@@ -1,0 +1,11 @@
+{
+    "name": "IdealHome",
+    "private": true,
+    "scripts": {
+        "dev": "concurrently -n frontend,backend -c blue,green \"pnpm --filter frontend dev\" \"pnpm --filter backend dev\"",
+        "build": "pnpm -r build"
+    },
+    "devDependencies": {
+        "concurrently": "^9.0.0"
+    }
+}
