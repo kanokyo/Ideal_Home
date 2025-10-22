@@ -23,12 +23,12 @@ USER_AGENT = (
 )
 
 # Obey robots.txt rules
-ROBOTSTXT_OBEY = True
+ROBOTSTXT_OBEY = False
 
 # Concurrency and throttling settings
-CONCURRENT_REQUESTS = 10
-CONCURRENT_REQUESTS_PER_DOMAIN = 10
-DOWNLOAD_DELAY = 3
+CONCURRENT_REQUESTS = 100
+CONCURRENT_REQUESTS_PER_DOMAIN = 100
+DOWNLOAD_DELAY = 1
 
 # Disable cookies (enabled by default)
 # COOKIES_ENABLED = False
@@ -68,14 +68,14 @@ DEFAULT_REQUEST_HEADERS = {
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-AUTOTHROTTLE_ENABLED = True
+# AUTOTHROTTLE_ENABLED = True
 # The initial download delay
-AUTOTHROTTLE_START_DELAY = 5
+# AUTOTHROTTLE_START_DELAY = 5
 # The maximum download delay to be set in case of high latencies
-AUTOTHROTTLE_MAX_DELAY = 60
+# AUTOTHROTTLE_MAX_DELAY = 10
 # The average number of requests Scrapy should be sending in parallel to
 # each remote server
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+# AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
 # Enable showing throttling stats for every response received:
 #AUTOTHROTTLE_DEBUG = False
 
@@ -88,15 +88,6 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
 # HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
 
 # Set settings whose default value is deprecated to a future-proof value
-FEED_EXPORT_ENCODING = "utf-8-sig"
-
-FEED_FORMAT='csv'
-FEED_EXPORT_FIELDS=[
-    "create_at",
-    "apartment_name",
-    "floor",
-    "url",
-]
 
 # HTTP と HTTPS のダウンロードハンドラーを指定する
 DOWNLOAD_HANDLERS = {
@@ -115,5 +106,82 @@ PLAYWRIGHT_BROWSER_TYPE = 'chromium'
 # }
 
 # ログ
-LOG_LEVEL = "DEBUG"
+LOG_LEVEL = "INFO"
 LOG_STDOUT = True
+
+FEEDS = {
+    'suumo.csv': {
+        'format': 'csv',
+        'encoding': 'utf-8-sig',
+        'store_empty': False,
+        'overwrite': False,
+        'append': True,
+        'item_export_kwargs': {
+            'include_headers_line': False
+        },
+        'fields': [
+            "url","get_time","building_name",
+            "rent_fee","maintenance_fee","deposit","key_money",
+            "security_deposit","nonrefundable_fee","imgs",
+            "address","walk_time","layout","m_2","building_age",
+            "floor","direction","building_type",
+            "features_equipment","layout_detail","building_structure",
+            "building_floors","build_date","insurance_required",
+            "parking","move_in_date","transaction_type","rental_conditions",
+            "agency_code","suumo_code","total_units","contract_period","initial_costs",
+        ],
+    },
+}
+
+FEED_EXPORT_ENCODING = "utf-8-sig"
+
+FEED_FORMAT='csv'
+FEED_EXPORT_FIELDS = [
+    # --- メタ情報 ---
+    "url",
+    "get_time",
+
+    # --- 基本情報 ---
+    "building_name",
+
+    # --- 金額情報 ---
+    "rent_fee",
+    "maintenance_fee",
+    "deposit",
+    "key_money",
+    "security_deposit",
+    "nonrefundable_fee",
+
+    # --- 画像 ---
+    "imgs",
+
+    # --- 立地・概要 ---
+    "address",
+    "walk_time",
+    "layout",
+    "m_2",
+    "building_age",
+    "floor",
+    "direction",
+    "building_type",
+
+    # --- 詳細情報 ---
+    "features_equipment",
+    "layout_detail",
+    "building_structure",
+    "building_floors",
+    "build_date",
+    # "energy_efficiency",
+    # "insulation_performance",
+    # "estimated_utility_cost",
+    "insurance_required",
+    "parking",
+    "move_in_date",
+    "transaction_type",
+    "rental_conditions",
+    "agency_code",
+    "suumo_code",
+    "total_units",
+    "contract_period",
+    "initial_costs",
+]

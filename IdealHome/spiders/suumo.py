@@ -1,199 +1,234 @@
-# import datetime
-# import scrapy
-# from scrapy_playwright.page import PageMethod
-# from ..items import IdealhomeItem
-
-# class SuumoSpider(scrapy.Spider):
-#     name = "suumo"
-#     allowed_domains = ["suumo.jp"]
-#     custom_settings = {
-#         "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": False},
-#         "LOG_FILE": "debug.log",
-#     }
-#     # 東京都全域, 表示件数50件, 新着順
-#     start_urls = ["https://suumo.jp/jj/chintai/ichiran/FR301FC001/?ar=030&bs=040&ta=13&sc=13101&sc=13102&sc=13103&sc=13104&sc=13105&sc=13113&sc=13106&sc=13107&sc=13108&sc=13118&sc=13121&sc=13122&sc=13123&sc=13109&sc=13110&sc=13111&sc=13112&sc=13114&sc=13115&sc=13120&sc=13116&sc=13117&sc=13119&sc=13201&sc=13202&sc=13203&sc=13204&sc=13205&sc=13206&sc=13207&sc=13208&sc=13209&sc=13210&sc=13211&sc=13212&sc=13213&sc=13214&sc=13215&sc=13218&sc=13219&sc=13220&sc=13221&sc=13222&sc=13223&sc=13224&sc=13225&sc=13227&sc=13228&sc=13229&sc=13300&cb=0.0&ct=9999999&mb=0&mt=9999999&et=9999999&cn=9999999&shkr1=03&shkr2=03&shkr3=03&shkr4=03&sngz=&po1=09&pc=50"]
-
-#     async def start(self):
-#         for url in self.start_urls:
-#             yield scrapy.Request(
-#                 url,
-#                 callback=self.parse,
-#                 meta={
-#                     "playwright": True,
-#                     "playwright_page_methods": [
-#                         PageMethod("wait_for_load_state", "networkidle"),
-#                         PageMethod("wait_for_selector", "#js-bukkenList li", timeout=15000),
-#                     ],
-#                 }
-#             )
-
-#     def parse(self, response):
-#         # 物件はul[1]/li[1]からスタートしてli[5]になったら次はul[2]/li[1]から始まる。
-#         ul = 1
-#         for li in range(1, 5):
-#             apartment_name = response.xpath(f'//*[@id="js-bukkenList"]/ul{ul}/li{li}/div/div[1]/div[2]/div/div[2]/text()').get()
-#             rooms = len(response.xpath(f'//*[@id="js-bukkenList"]/ul{ul}/li{li}/div/div[2]/table/tbody'))
-
-#             # 物件ごとの部屋をとる(tbodyは1スタート)
-#             for room in range(1, rooms+1):
-#                 # 階だけ取得
-#                 floor = response.xpath(f'//*[@id="js-bukkenList"]/ul{ul}/li{li}/div/div[2]/table/tbody[{room}]/tr/td[3]/text()').get()
-#                 url = response.xpath(f'//*[@id="js-bukkenList"]/ul{ul}/li{li}/div/div[2]/table/tbody[{room}]/tr/td[9]/a/@href').get()
-#                 yield IdealhomeItem(
-#                     create_at = datetime.datetime.now(),
-#                     apartment_name = apartment_name.strip(),
-#                     floor = floor.strip(),
-#                     url = url,
-#                 )
-#                 print(apartment_name, floor, url)
-
-#                 if li == 5:
-#                     li = 1
-#                     ul += 1
-
-# suumo.py
+import json
 import datetime
+import re
 import scrapy
-from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from scrapy_playwright.page import PageMethod
 from ..items import IdealhomeItem
-
-# 単発最適化：帯域を食うリソースはブロック
-BLOCK_TYPES = {"image", "media", "font", "stylesheet"}
-
-def set_qs(url: str, **params) -> str:
-    """URLのクエリ文字列を安全に上書き（既存パラメータは維持）。"""
-    p = urlparse(url)
-    q = dict(parse_qsl(p.query, keep_blank_values=True))
-    q.update({k: str(v) for k, v in params.items() if v is not None})
-    return urlunparse((p.scheme, p.netloc, p.path, p.params, urlencode(q, doseq=True), p.fragment))
-
+import os
+import csv
 class SuumoSpider(scrapy.Spider):
     name = "suumo"
     allowed_domains = ["suumo.jp"]
-
-    # 並列の“ウィンドウ幅”。settings.py で SUUMO_PREFETCH を指定可（未指定は 4）
-    prefetch_default = 4
-
-    # scrapy-playwright==0.0.44 を想定：Middleware なし / Handler のみ
     custom_settings = {
-        "DOWNLOAD_HANDLERS": {
-            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        },
-        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 60000,
-        "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
-        "FEED_EXPORT_ENCODING": "utf-8-sig",
-        "FEED_EXPORT_FIELDS": ["create_at", "apartment_name", "floor", "url"],
-        # 実際の並列数・ディレイ等は settings.py 側で調整OK
+        "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True},
+        "LOG_FILE": f"suumo-{datetime.datetime.now()}.log",
     }
 
-    start_urls = [
-        "https://suumo.jp/jj/chintai/ichiran/FR301FC001/?ar=030&bs=040&ta=13&sc=13101&sc=13102&sc=13103&sc=13104&sc=13105&sc=13113&sc=13106&sc=13107&sc=13108&sc=13118&sc=13121&sc=13122&sc=13123&sc=13109&sc=13110&sc=13111&sc=13112&sc=13114&sc=13115&sc=13120&sc=13116&sc=13117&sc=13119&sc=13201&sc=13202&sc=13203&sc=13204&sc=13205&sc=13206&sc=13207&sc=13208&sc=13209&sc=13210&sc=13211&sc=13212&sc=13213&sc=13214&sc=13215&sc=13218&sc=13219&sc=13220&sc=13221&sc=13222&sc=13223&sc=13224&sc=13225&sc=13227&sc=13228&sc=13229&sc=13300&cb=0.0&ct=9999999&mb=0&mt=9999999&et=9999999&cn=9999999&shkr1=03&shkr2=03&shkr3=03&shkr4=03&sngz=&po1=09&pc=50&page=1"
-    ]
+    start_urls = ["https://suumo.jp/chintai/tokyo/city/"]
+    # 50件表示でも正確に取れる
+    search_url = "https://suumo.jp/jj/chintai/ichiran/FR301FC001/?ar=030&bs=040&ta=13&sc={}&pc=50"
 
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super().from_crawler(crawler, *args, **kwargs)
-        spider.prefetch = int(crawler.settings.getint("SUUMO_PREFETCH", cls.prefetch_default))
-        return spider
+    def __init__(self, *args, **kwargs):
+        self.new = kwargs.pop('new', False)
+        self.csv_path = "IdealHome/IdealHome/suumo.csv"
+        self.seen_urls = set()
 
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self.seen_urls: set[str] = set()
-        self._stop = False
-        self._next_to_schedule = 1  # 次に投入する page 番号（1 始まり）
+    def open_spider(self, spider):
+        # 「新規実行」指定があれば既存URLを無視
+        if not self.new and os.path.exists(self.csv_path):
+            with open(self.csv_path, newline='', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get("url"):
+                        self.seen_urls.add(row["url"])
+            self.logger.info(f"Loaded {len(self.seen_urls)} existing URLs from CSV")
+        else:
+            # 新規実行のときは"get_time"から8日以上経過ているかを確認し、8日以上立っていたら再度データを取得する。その際、掲載終了していたらうんたらこうたら
+            self.logger.info("New crawl: skipping CSV preload")
 
-    # ── Playwright 用 meta（単発最適化：body待ち＋リソースブロック） ──
-    def _meta_for_request(self):
-        return {
-            "playwright": True,
-            "playwright_context_kwargs": {
-                "locale": "ja-JP",
-                "user_agent": self.settings.get("USER_AGENT"),
-            },
-            "playwright_page_methods": [
-                PageMethod(
-                    "route", "**/*",
-                    lambda route: route.abort()
-                    if route.request.resource_type in BLOCK_TYPES
-                    else route.continue_()
-                ),
-                # エラーページでも確実に返る "body" を待つ（networkidle は使わない）
-                PageMethod("wait_for_selector", "body", timeout=45000),
-            ],
-        }
-
-    # ── Request を作る共通関数 ──
-    def _make_req(self, base_url: str, page: int):
-        url = set_qs(base_url, page=page)
-        return scrapy.Request(
-            url,
-            callback=self.parse_list,
-            cb_kwargs={"page": page},
-            meta=self._meta_for_request(),
-            dont_filter=False,      # URLは毎回異なる
-            priority=page,          # 低いページを先に
-        )
-
-    # ── 最初に prefetch 分だけ投入 ──
     async def start(self):
-        base = self.start_urls[0]
-        for p in range(1, self.prefetch + 1):
-            yield self._make_req(base, p)
-        self._next_to_schedule = self.prefetch + 1
+        for url in self.start_urls:
+            yield scrapy.Request(
+                url,
+                callback=self.parse,
+                meta={
+                    "playwright": True,
+                }
+            )
 
-    # ── 1ページ処理 → 次ページを“1つだけ”追加投入（スライディングウィンドウ） ──
-    def parse_list(self, response: scrapy.http.Response, page: int):
-        # 1) 存在しないページの判定（あなた指定の文言）
-        err_text = response.xpath(
-            'normalize-space(//*[@id="js-errorcontents"]/div[3]/div/div/div/div[2]/div/p[1]/text())'
-        ).get()
-        if err_text == "ページを表示できませんでした。":
-            self._stop = True
-            self.logger.info(f"[END] non-existent page reached: page={page} url={response.url}")
-            return
+    def parse(self, response, **kwargs):
+        SCs = response.xpath('//table[@class="searchtable"]//input[@name="sc"]/@value').getall()
+        for SC in SCs :
+            yield scrapy.Request(
+                url = self.search_url.format(SC),
+                callback=self.parse_list,
+                meta={
+                    "playwright": True,
+                }
+            )
 
-        # 2) 通常ページの抽出（PR/広告を避け、rent系に限定）
-        cards = response.xpath(
-            "//*[@id='js-bukkenList']"
-            "//div[contains(@class,'cassetteitem') and contains(@class,'cassetteitem--rent')]"
-        )
-        self.logger.info(f"[LIST] page={page} cards={len(cards)}")
-
-        for card in cards:
-            # 物件名（div/h2 両対応、normalize-space）
-            name = card.xpath(
-                "normalize-space((.//div[contains(@class,'cassetteitem_content-title')]"
-                " | .//h2[contains(@class,'cassetteitem_content-title')])[1])"
-            ).get()
-            if not name:
-                # apartment_name を必須扱いに（スパイダ段階で弾く）
+    def parse_list(self, response):
+        property_paths = response.xpath('//a[contains(text(), "詳細を見る")]/@href').getall()
+        # logger.info(f"部屋数: {len(property_paths)}")
+        for property_path in property_paths:
+            url = response.urljoin(property_path)
+            # ここでcsvのurlを参照して同じものは弾く。
+            if url in self.seen_urls:
+                self.logger.info(f"Already Exists: {url}")
                 continue
+            yield scrapy.Request(
+                url = url,
+                callback=self.parse_property,
+                meta={
+                    "playwright": True,
+                }
+            )
 
-            # 部屋：リンクがある tbody のみ
-            for row in card.xpath(".//table/tbody[.//td[9]//a/@href]"):
-                floor = (row.xpath("./tr/td[3]/text()").get() or "").strip()
-                href  = row.xpath(".//td[9]//a[contains(@class,'js-cassette_link')]/@href").get() \
-                        or row.xpath(".//td[9]//a[1]/@href").get()
-                if not href:
-                    continue
-                detail = response.urljoin(href)
+        # 次ページへ
+        next_path = response.xpath('//a[contains(text(), "次へ")]/@href').get()
+        if next_path:
+            yield scrapy.Request(
+                url = response.urljoin(next_path),
+                callback=self.parse_list,
+                meta={
+                    "playwright": True,
+                }
+            )
 
-                # URL重複ガード（必要なら (detail, floor) に変更）
-                if detail in self.seen_urls:
-                    continue
-                self.seen_urls.add(detail)
+    def parse_property(self, response):
+        self.seen_urls.add(response.url)
+        building_name           = response.xpath('//*[@id="wrapper"]/div[3]/div[1]/h1/text()').get()
+        rent_fee                = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[1]/span[1]/text()').get()) # 賃料
+        maintenance_fee         = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[1]/span[2]/text()').get()) # 管理費・共益費
+        deposit                 = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[2]/span[1]/text()').get()) # 敷金
+        key_money               = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[2]/span[2]/text()').get()) # 礼金
+        security_deposit        = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[2]/span[3]/text()').get()) # 保証金
+        nonrefundable_fee       = extract_price(response.xpath('//*[@id="js-view_gallery"]/div[1]/div[1]/div[2]/span[4]/text()').get()) # 敷引・償却
 
-                yield IdealhomeItem(
-                    create_at=datetime.datetime.utcnow().isoformat(),
-                    apartment_name=name,
-                    floor=floor,
-                    url=detail,
-                )
+        imgs                    = response.xpath('//*[@id="js-view_gallery-navlist"]//img/@data-src').getall() # 画像
 
-        # 3) 次ページを“1つだけ”追加投入（ウィンドウ幅を維持）
-        if not self._stop:
-            next_page = self._next_to_schedule
-            self._next_to_schedule += 1
-            yield self._make_req(self.start_urls[0], next_page)
+        address                 = response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[1]/td/text()').get() # 所在地
+        walk_time               =  ";".join([t.strip() for t in response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[2]/td//text()').getall()]) # 駅徒歩
+        layout                  = response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[3]/td[1]/text()').get() # 間取り
+        m_2                     = (response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[3]/td[2]/text()').get() or "").replace("m", "") # 専有面積
+        building_age            = extract_floor(response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[4]/td[1]/text()').get()) # 築年数
+        floor                   = extract_floor(response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[4]/td[2]/text()').get()) # 階
+        direction               = response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[5]/td[1]/text()').get() # 向き
+        building_type           = response.xpath('//*[@id="js-view_gallery"]/div[3]/table/tbody/tr[5]/td[2]/text()').get() # 建物種別
+
+        features_equipment      = [t.strip() for t in response.xpath('//*[@id="bkdt-option"]/div/ul/li//text()').getall() if t.strip()] # 部屋の特徴・設備
+
+        layout_detail           = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[1]/td[1]/text()').get() # 間取り詳細
+        building_structure      = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[1]/td[2]/text()').get() # 構造
+        building_floors         = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[2]/td[1]/text()').get() # 階建
+        build_date              = (response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[2]/td[2]/text()').get() or "").replace("年", "-").replace("月", "") # 築年月
+        # energy_efficiency       = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[3]/td[1]/text()').get() # エネルギー消費性能
+        # insulation_performance  = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[3]/td[2]/text()').get() # 断熱性能
+        # estimated_utility_cost  = "".join(response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[4]/td//text()').getall()) # 目安光熱費
+        insurance_required      = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[5]/td[1]/text()').get() # 損保
+        parking                 = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[5]/td[2]/text()').get() # 駐車場
+        move_in_date            = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[6]/td[1]/text()').get() # 入居
+        transaction_type        = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[6]/td[2]/text()').get() # 取引態様
+        rental_conditions       = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[7]/td[1]/text()').get() # 条件
+        agency_code             = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[7]/td[2]/text()').get() # 取り扱い店舗物件コード
+        suumo_code              = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[8]/td[1]/text()').get() # SUUMO物件コード
+        total_units             = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[8]/td[2]/text()').get() # 総戸数
+        label                   = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[10]/th/text()').get()
+
+        if label and "契約期間" in label:
+            contract_period     =  ";".join(response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[10]/td/ul//text()').getall()) # 契約期間
+        else:
+            contract_period     = ""
+        label                   = response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[11]/th/text()').get()
+        if label and "その他初期費用" in label:
+            match               = re.search(r'内訳：(.+?)）', "".join(response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[11]/td/ul//text()').getall()))
+        else:
+            match               = re.search(r'内訳：(.+?)）', "".join(response.xpath('//*[@id="contents"]/div[3]/table/tbody/tr[12]/td/ul//text()').getall()))
+        initial_costs           = match.group(1) if match else "" # その他初期費用
+
+        item = IdealhomeItem()
+
+        item["url"] = response.url
+        item["get_time"] = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()
+        item["building_name"] = building_name
+        item["rent_fee"] = rent_fee
+        item["maintenance_fee"] = maintenance_fee
+        item["deposit"] = deposit
+        item["key_money"] = key_money
+        item["security_deposit"] = security_deposit
+        item["nonrefundable_fee"] = nonrefundable_fee
+        item["imgs"] = json.dumps(imgs, ensure_ascii=False)
+        item["address"] = address
+        item["walk_time"] = walk_time
+        item["layout"] = layout
+        item["m_2"] = m_2
+        item["building_age"] = building_age
+        item["floor"] = floor
+        item["direction"] = direction
+        item["building_type"] = building_type
+        item["features_equipment"] = features_equipment
+        item["layout_detail"] = layout_detail
+        item["building_structure"] = building_structure
+        item["building_floors"] = building_floors
+        item["build_date"] = build_date
+        # item["energy_efficiency"] = energy_efficiency
+        # item["insulation_performance"] = insulation_performance
+        # item["estimated_utility_cost"] = estimated_utility_cost
+        item["insurance_required"] = insurance_required
+        item["parking"] = parking
+        item["move_in_date"] = move_in_date
+        item["transaction_type"] = transaction_type
+        item["rental_conditions"] = rental_conditions
+        item["agency_code"] = agency_code
+        item["suumo_code"] = suumo_code
+        item["total_units"] = total_units
+        item["contract_period"] = contract_period
+        item["initial_costs"] = initial_costs
+
+        for key, value in item.items():
+            if isinstance(value, str):
+                item[key] = clean_text(value)
+
+        yield item
+
+def extract_floor(text: str):
+    if not text:
+        return None
+
+    nums = re.findall(r'\d+', text)
+    if "新築" in text:
+        return 0
+    if not nums:
+        return None
+
+    # 地下ならマイナス化
+    if "地下" in text:
+        current = -int(nums[0])
+    else:
+        current = int(nums[0])
+
+    return current
+
+def extract_price(text: str):
+    if not text or text.strip() == '-' or text.strip() == '―':
+        return None
+
+    # すべての数値を抽出（例: ['1.5', '2.3']）
+    nums = re.findall(r'\d+(?:\.\d+)?', text)
+    if not nums:
+        return None
+
+    if "万" in text:
+        return int(float(nums[0]) * 10000)
+    else:
+        return int(float(nums[0]))
+
+import re
+
+def clean_text(text: str):
+    """
+    文字列の前後・内部の不要な空白や改行を削除して正規化する関数
+    """
+    if not text:
+        return ""
+
+    # 全角→半角スペース、ノーブレークスペース削除
+    text = text.replace("\u3000", " ").replace("\xa0", " ")
+
+    # 改行・タブをスペースに統一
+    text = re.sub(r"[\r\n\t]+", " ", text)
+
+    # 連続スペースを1つに
+    text = re.sub(r"\s{2,}", " ", text)
+
+    return text.strip()
